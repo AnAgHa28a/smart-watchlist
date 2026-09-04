@@ -1,4 +1,4 @@
-import type { User, WatchlistResponse, SymbolSearchResult, ConvictionTier } from "../types";
+import type { User, WatchlistResponse, SymbolSearchResult, ConvictionTier, MarketPulseResponse } from "../types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -49,6 +49,8 @@ export const api = {
   getWatchlist: () => request<WatchlistResponse>("/watchlist"),
 
   getWatchlistLive: () => request<WatchlistResponse>("/watchlist/live"),
+
+  getMarketPulse: () => request<MarketPulseResponse>("/market/pulse"),
 
   searchSymbols: (q: string) =>
     request<SymbolSearchResult[]>(`/watchlist/search?q=${encodeURIComponent(q)}`),

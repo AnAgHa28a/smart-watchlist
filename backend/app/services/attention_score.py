@@ -31,10 +31,17 @@ class ScoreResult:
     gap_pct: float | None
     insufficient_history: bool
     explanation: str
+    is_extended_move: bool = False
 
 
 DIGEST_THRESHOLD = {"core": 55.0, "trading": 30.0}
 NEAR_LEVEL_PCT = 0.02  # within 2% of 52w high/low counts as "near"
+# A move this many standard deviations out is statistically rare enough
+# (>~2.5σ, under ~1.2% of days for a normal distribution) that it's flagged
+# as "extended" — a purely descriptive statistical fact, not a prediction:
+# large moves regress toward the mean more often than they extend further,
+# but this is not trading advice, just a framing hint.
+EXTENDED_MOVE_Z = 2.5
 
 
 def compute_attention_score(
@@ -95,6 +102,7 @@ def compute_attention_score(
         gap_pct=round(gap_pct, 2) if gap_pct is not None else None,
         insufficient_history=insufficient_history,
         explanation=explanation,
+        is_extended_move=bool(z_score is not None and abs(z_score) >= EXTENDED_MOVE_Z),
     )
 
 

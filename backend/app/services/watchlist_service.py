@@ -8,7 +8,10 @@ from app.services.sector_analysis import compute_sector_avg_moves, classify_sect
 from app.services.market_hours import is_market_open
 from app.services.poller import load_universe
 from app.services.digest import generate_digest_narrative
-from app.schemas import WatchlistEntryOut, SignalBreakdown, DigestItem, WatchlistResponse
+from app.schemas import (
+    WatchlistEntryOut, SignalBreakdown, DigestItem, WatchlistResponse,
+    WatchlistInsights, SectorAllocationEntry,
+)
 
 # How much the score (or price) must move beyond what the user already saw
 # before we re-flag an already-acknowledged symbol in the digest again.
@@ -86,6 +89,11 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
         )
 
         sector_cls = classify_sector_relative(change_pct, universe_info.get("sector"), sector_avg_moves)
+        relative_strength = (
+            round(change_pct - sector_cls.sector_avg_move_pct, 2)
+            if (change_pct is not None and sector_cls.sector_avg_move_pct is not None)
+            else None
+        )
 
         is_new = checkpoint is None
         price_delta = (snap.price - checkpoint.last_seen_price) if (checkpoint and checkpoint.last_seen_price) else None
@@ -114,6 +122,7 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
                 sector_relative=sector_cls.label,
                 sector_avg_move_pct=sector_cls.sector_avg_move_pct,
                 explanation=score_result.explanation,
+                is_extended_move=score_result.is_extended_move,
             ),
             is_new_since_last_visit=is_new,
             price_change_since_last_seen=round(price_delta, 2) if price_delta is not None else None,
@@ -121,6 +130,10 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
             score_delta_since_last_seen=round(score_delta, 1) if score_delta is not None else None,
             last_seen_at=checkpoint.last_seen_at if checkpoint else None,
             insufficient_history=score_result.insufficient_history,
+            sparkline=stats.recent_closes if stats else None,
+            high_52w=stats.high_52w if stats else None,
+            low_52w=stats.low_52w if stats else None,
+            relative_strength_pct=relative_strength,
         )
         results.append(entry)
 
@@ -172,4 +185,37 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
         digest=digest,
         digest_narrative=narrative,
         items=results,
+        insights=_build_insights(items_db, universe),
     )
+
+
+# A single sector holding at least this share of the watchlist triggers a
+# concentration callout — a sector-wide move would then swing most of the
+# list at once, which is a risk worth naming even though nothing "changed".
+CONCENTRATION_THRESHOLD_PCT = 50.0
+
+
+def _build_insights(items_db: list[WatchlistItem], universe: dict) -> WatchlistInsights | None:
+    if not items_db:
+        return None
+
+    counts: dict[str, int] = {}
+    for item in items_db:
+        sector = universe.get(item.symbol, {}).get("sector", "Other")
+        counts[sector] = counts.get(sector, 0) + 1
+
+    total = len(items_db)
+    allocation = sorted(
+        [SectorAllocationEntry(sector=s, count=c, pct=round(c / total * 100, 1)) for s, c in counts.items()],
+        key=lambda e: -e.count,
+    )
+
+    warning = None
+    top = allocation[0]
+    if top.pct >= CONCENTRATION_THRESHOLD_PCT and total >= 3:
+        warning = (
+            f"{top.pct:.0f}% of your watchlist is in {top.sector} — "
+            f"a single sector-wide move could swing most of your list at once."
+        )
+
+    return WatchlistInsights(sector_allocation=allocation, concentration_warning=warning)

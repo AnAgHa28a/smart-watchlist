@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useWatchlist } from "../hooks/useWatchlist";
+import { useMarketPulse } from "../hooks/useMarketPulse";
 import { api } from "../api/client";
 import DigestPanel from "../components/DigestPanel";
 import WatchlistRow from "../components/WatchlistRow";
 import AddSymbolModal from "../components/AddSymbolModal";
+import SectorAllocation from "../components/SectorAllocation";
+import MarketPulsePanel from "../components/MarketPulsePanel";
 import type { ConvictionTier } from "../types";
 
 export default function WatchlistPage() {
   const { user, logout } = useAuth();
   const { data, loading, error, revisit } = useWatchlist();
+  const pulse = useMarketPulse();
   const [showAddModal, setShowAddModal] = useState(false);
 
   const handleRemove = async (symbol: string) => {
@@ -37,7 +41,7 @@ export default function WatchlistPage() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-6 py-8">
         {loading && (
           <div className="flex justify-center py-24">
             <div className="h-6 w-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -53,6 +57,10 @@ export default function WatchlistPage() {
         {data && (
           <>
             <DigestPanel digest={data.digest} narrative={data.digest_narrative} marketOpen={data.market_open} />
+
+            {pulse && <MarketPulsePanel pulse={pulse} />}
+
+            {data.insights && data.items.length > 0 && <SectorAllocation insights={data.insights} />}
 
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-medium text-slate-400">

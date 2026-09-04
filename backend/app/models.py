@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Boolean, ForeignKey,
-    UniqueConstraint, Enum,
+    UniqueConstraint, Enum, JSON,
 )
 from sqlalchemy.orm import relationship
 
@@ -78,6 +78,11 @@ class SymbolStats(Base):
     history_days = Column(Integer, default=0)
     sector = Column(String, nullable=True)
     name = Column(String, nullable=True)
+    # Trimmed trailing window of daily closes (~60 sessions), kept purely for
+    # the sparkline — the backfill call already fetches a full year to
+    # compute volatility, so this is free: no extra request, just persisting
+    # a slice of data we'd otherwise discard.
+    recent_closes = Column(JSON, nullable=True)
     last_updated = Column(DateTime, default=datetime.utcnow)
 
 

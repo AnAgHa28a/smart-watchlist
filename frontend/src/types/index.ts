@@ -14,6 +14,7 @@ export interface SignalBreakdown {
   sector_relative: "sector-wide" | "idiosyncratic" | null;
   sector_avg_move_pct: number | null;
   explanation: string;
+  is_extended_move: boolean;
 }
 
 export interface WatchlistEntry {
@@ -36,6 +37,46 @@ export interface WatchlistEntry {
   score_delta_since_last_seen: number | null;
   last_seen_at: string | null;
   insufficient_history: boolean;
+
+  sparkline: number[] | null;
+  high_52w: number | null;
+  low_52w: number | null;
+  relative_strength_pct: number | null;
+}
+
+export interface SectorAllocationEntry {
+  sector: string;
+  count: number;
+  pct: number;
+}
+
+export interface WatchlistInsights {
+  sector_allocation: SectorAllocationEntry[];
+  concentration_warning: string | null;
+}
+
+export interface SectorPulse {
+  sector: string;
+  avg_move_pct: number;
+  symbol_count: number;
+  flagged_count: number;
+}
+
+export interface TopMover {
+  symbol: string;
+  name: string | null;
+  sector: string | null;
+  change_pct: number;
+  attention_score: number;
+}
+
+export interface MarketPulseResponse {
+  generated_at: string;
+  market_open: boolean;
+  universe_size: number;
+  flagged_count: number;
+  sectors: SectorPulse[];
+  top_movers: TopMover[];
 }
 
 export interface DigestItem {
@@ -51,6 +92,7 @@ export interface WatchlistResponse {
   digest: DigestItem[];
   digest_narrative: string;
   items: WatchlistEntry[];
+  insights: WatchlistInsights | null;
 }
 
 export interface SymbolSearchResult {

@@ -62,6 +62,7 @@ async def backfill_symbol_stats(db: Session, symbol: str, sector: str, name: str
     row.history_days = len(closes)
     row.sector = sector
     row.name = name
+    row.recent_closes = closes[-60:]
     row.last_updated = datetime.utcnow()
     db.commit()
 
