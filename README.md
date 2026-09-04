@@ -310,11 +310,12 @@ all free tier:
 ## The 100-word pitch
 
 Signal is a watchlist that answers one question: what actually deserves my
-attention right now? Instead of raw % change, every stock gets an Attention
-Score — its move judged against its *own* volatility, volume, and 52-week
-range, then checked against its sector peers to separate market-wide noise
-from real, idiosyncratic signal. A server-persisted checkpoint per user, per
-symbol powers a genuine "since you last checked" digest across devices, not
-just a local cache. Built around a hard truth: free real-time NSE data
-doesn't really exist — so the system cascades sources, circuit-breaks
-failures, and is always honest about staleness rather than silently wrong.
+attention right now? Every stock gets an Attention Score — its move judged
+against its *own* volatility, volume, and sector peers, not a flat %
+threshold. A server-persisted checkpoint per user powers a genuine "since
+you last checked" digest across devices. The standout: a backtest replays
+the same scoring algorithm across a year of real prices, so its hit rate is
+shown honestly, not just asserted — high-confidence flags measurably
+outperform low-confidence ones. Built around a hard truth: free real-time
+NSE data doesn't really exist, so the system cascades sources and stays
+honest about staleness rather than silently wrong.
