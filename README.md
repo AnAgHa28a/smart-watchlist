@@ -12,12 +12,17 @@ Built for the Groww hackathon brief: *"Build a smart market watchlist that
 helps users understand what has meaningfully changed since they last
 checked."*
 
-**The four things worth knowing before you dig in:**
+### Jump to
+[The core idea](#the-core-idea) · [Non-obvious choices](#three-deliberate-non-obvious-choices) · [Beyond the watchlist](#beyond-the-watchlist-itself) · [Architecture](#architecture) · [The brief's questions, answered](#answering-the-briefs-you-decide-points-directly) · [NSE data problem](#solving-the-nse-data-problem) · [Setup](#setup) · [100-word pitch](#the-100-word-pitch)
 
-1. **The product is a diff, not a dashboard.** The core mechanic isn't "show live prices" — it's a server-persisted snapshot of what you saw last time, diffed against now, on every visit, across devices. Prices are the input; the digest is the point.
-2. **The score is a backtest, not a guess.** [`services/backtest.py`](backend/app/services/backtest.py) replays the live scoring function across a year of real historical prices (no lookahead) and grades every flag it would have raised. The result: 70+ score flags show a measurably higher continuation rate than 30-50 score ones — the algorithm is checked against reality, not just asserted. See **Track record** in the live app.
-3. **A real production constraint, handled, not hidden.** Free real-time NSE data doesn't exist — confirmed directly (`nseindia.com` returns `403` even with a proper browser User-Agent). The system cascades sources with a circuit breaker and is always honest about staleness instead of quietly wrong. See *Solving the NSE data problem* below.
-4. **It's actually deployed and it actually works.** Not a localhost screenshot — a live link, a real Postgres database, real session auth, tested end-to-end including a full page reload to prove session persistence.
+### Four things worth knowing before you dig in
+
+| # | This isn't... | It's... |
+|---|---|---|
+| 1 | ...a live-price dashboard | **A diff.** A server-persisted snapshot of what you saw last time, diffed against now, on every visit, across devices. Prices are the input; the digest is the point. |
+| 2 | ...a scoring formula you take on faith | **A backtest.** [`services/backtest.py`](backend/app/services/backtest.py) replays the live scoring function across a year of real prices (no lookahead) and grades every flag it raises. 70+ score flags show a measurably *higher* hit rate than 30–50 score ones — see **Track record** in the live app. |
+| 3 | ...pretending free real-time NSE data exists | **A handled constraint.** Confirmed directly: `nseindia.com` returns `403` even with a proper browser User-Agent. The system cascades sources with a circuit breaker and stays honest about staleness — see [*Solving the NSE data problem*](#solving-the-nse-data-problem). |
+| 4 | ...a localhost screenshot | **Actually deployed.** Live link, real Postgres, real session auth — tested end-to-end including a full page reload to prove session persistence. |
 
 ---
 
@@ -65,62 +70,19 @@ grounded in the same computed facts (never free to invent numbers).
 
 ## Beyond the watchlist itself
 
-**A self-graded track record.** Most products just assert their signal is
-good. This one shows it: [`services/backtest.py`](backend/app/services/backtest.py)
-replays the exact same scoring function day-by-day across a year of real
-historical prices per symbol — careful to only use data available as of
-each simulated day, no lookahead — and grades every flag against what
-actually happened over the next 5 sessions. Because it's a real backtest
-against real history, the scorecard is fully populated on day one instead
-of starting empty, and it keeps grading new live flags the same way going
-forward. The result is genuinely informative, not cherry-picked: overall
-hit rate is roughly a coin flip, but the algorithm's *highest-confidence*
-flags (score 70+) show a meaningfully higher continuation rate than its
-low-confidence ones — evidence the score isn't just noise.
+Eight additions, ranked by how rare they are in a typical watchlist — the
+first two are the ones worth reading closely if you're short on time:
 
-**Cross-stock correlation detection.** The sector-concentration warning
-catches "80% of your list is IT." It can't catch two stocks in *different*
-sectors that still move together most days. This computes real pairwise
-correlation of daily returns from the same close-price history already
-stored for the sparkline — pure computation, no new data — and flags pairs
-above 0.7, prioritizing cross-sector matches since same-sector correlation
-is already explained by the allocation widget.
-
-**Market Pulse.** A personal watchlist can only ever answer "how are *my*
-stocks doing" — it can't tell you whether today's move is a you-problem or a
-market-wide one. Since the poller already tracks the full ~80-symbol NSE
-universe regardless of anyone's watchlist (see "How the system scales"
-below), this is free
-to surface: a diverging chart of today's average move per sector across the
-*entire* tracked market, plus the most statistically unusual movers overall —
-context no per-user watchlist could give on its own.
-
-**Sector concentration risk.** The watchlist composition is visualized as a
-part-to-whole bar, and if one sector crosses ~50% of the list, a callout
-names the risk explicitly: a sector-wide move would swing most of the list at
-once. This is a smart-watchlist question ("should I even be worried about
-diversification here") that a bare price list never raises.
-
-**Custom per-stock alerts.** Layered on top of the Core/Trading tiers: a
-user can set an explicit price or volume-spike trigger per symbol,
-evaluated once per poll cycle against the shared price cache — the same
-O(universe), not O(users), scaling principle as the rest of the poller.
-
-**Real sparklines, not decoration.** The statistical backfill already fetches
-a year of daily closes per symbol to compute volatility — previously that
-series was discarded right after computing the number. It's now persisted
-(trimmed to the trailing ~60 sessions) and rendered directly, so every chart
-in the product is backed by real historical data, not a placeholder squiggle.
-
-**Per-stock drill-down.** Expanding a row shows the actual mechanics behind
-its score: a 52-week range position indicator, a volatility meter, a volume
-meter, and relative strength vs. its sector today — so the Attention Score
-is never a black box.
-
-**An "extended move" flag.** When a stock's z-score exceeds ~2.5σ, it's
-labeled a statistical outlier with a plain note that such moves regress
-toward the mean more often than they extend further — a framing hint, not a
-prediction, but the kind of context a raw % figure never carries.
+| Feature | Why it's there, not just decoration |
+|---|---|
+| **Self-graded track record** | [`backtest.py`](backend/app/services/backtest.py) replays the *exact* live scoring function across a year of real prices and grades every flag against what actually happened next. Fully populated on day one (not an empty promise), and keeps grading new live flags the same way. Result: 70+ score flags show a meaningfully higher continuation rate than 30–50 ones — evidence the score isn't noise. |
+| **Cross-stock correlation** | The sector-concentration warning catches "80% of your list is IT." It can't catch two stocks in *different* sectors that still move together most days. Real pairwise correlation of daily returns, computed from data already stored for the sparkline — no new data — flags pairs above 0.7. |
+| **Market Pulse** | A personal watchlist can only answer "how are *my* stocks doing." Since the poller already tracks the full ~80-symbol universe regardless of anyone's list (see [scaling](#answering-the-briefs-you-decide-points-directly)), this surfaces sector-wide moves and the most unusual movers overall — for free. |
+| **Sector concentration risk** | Watchlist composition as a part-to-whole bar; a callout names the risk explicitly once one sector crosses ~50% — a diversification question a bare price list never raises. |
+| **Custom per-stock alerts** | Price or volume-spike triggers layered on the Core/Trading tiers, evaluated once per poll cycle against the shared cache — same O(universe) scaling as the rest of the poller. |
+| **Real sparklines** | Free byproduct of the volatility backfill (a year of daily closes, previously discarded right after computing the stdev) — real historical data, not a placeholder squiggle. |
+| **Per-stock drill-down** | Expanding a row shows the actual mechanics: 52-week range position, a volatility meter, a volume meter, relative strength vs. sector — the score is never a black box. |
+| **"Extended move" flag** | When a z-score exceeds ~2.5σ, a plain note that such moves regress toward the mean more often than they extend further — a framing hint, not a prediction. |
 
 ## Architecture
 
@@ -174,35 +136,17 @@ across devices" is a server problem, not a client one.
 
 ## Answering the brief's "you decide" points directly
 
-**What counts as a meaningful change** — the volatility-adjusted composite
-score above, thresholded differently per conviction tier
-([`attention_score.py`](backend/app/services/attention_score.py)).
+The brief lists six things it deliberately leaves open. Here's the direct
+answer to each, in the same order:
 
-**What information to surface** — not a bare price, but *why* it's flagged:
-one generated sentence per stock (`"Up 3.2%, 2.8x its usual daily move, on
-4x average volume, near its 52-week high."`), plus the sector-relative tag.
-
-**How state persists across sessions/devices** — server-side Postgres, keyed
-by user id, not device. Log in anywhere, see the same watchlist and the same
-diff-since-last-seen state
-([`UserSymbolCheckpoint`](backend/app/models.py)).
-
-**How stale/delayed/conflicting data is handled** — see the dedicated
-section below; short version: a source cascade with a circuit breaker, and
-every price is labeled live/stale rather than silently wrong.
-
-**How the system scales** — one poller tracks the fixed symbol universe
-regardless of user count (`O(universe)`, not `O(users × watchlist size)`);
-every client reads a shared DB-backed cache instead of triggering its own
-fetch; the diff-vs-live split (below) means the frequent polling loop never
-touches write-heavy checkpoint state.
-
-**Where I kept it simple vs. added complexity** — short-interval polling
-instead of WebSockets (reduces deployment risk in a hard time box; the
-scaling story doesn't need it — see below); no options chain, no portfolio
-P&L, no ML sentiment model; a fixed, curated NSE universe instead of
-open-ended arbitrary ticker search (makes "add symbol" a safe, validated
-autocomplete instead of a place invalid input can break the pipeline).
+| The brief asks... | Our answer |
+|---|---|
+| What counts as a **meaningful change**? | A volatility-adjusted composite score ([`attention_score.py`](backend/app/services/attention_score.py)), thresholded differently per conviction tier — not a flat % rule. |
+| What **information to surface**? | Not a bare price — *why* it's flagged: one generated sentence per stock (`"Up 3.2%, 2.8x its usual daily move, on 4x average volume, near its 52-week high."`), plus the sector-relative tag. |
+| How does **state persist across sessions/devices**? | Server-side Postgres, keyed by user id, not device. Log in anywhere, see the same watchlist and the same diff-since-last-seen state ([`UserSymbolCheckpoint`](backend/app/models.py)). |
+| How to handle **stale/delayed/conflicting data**? | A source cascade with a circuit breaker (see [below](#solving-the-nse-data-problem)); every price is labeled live/stale rather than silently wrong. |
+| How does the system **scale**? | One poller tracks the fixed symbol universe regardless of user count — `O(universe)`, not `O(users × watchlist size)`. Every client reads a shared DB-backed cache instead of triggering its own fetch; the diff-vs-live endpoint split means the frequent polling loop never touches write-heavy checkpoint state. |
+| Where to keep it **simple vs. add complexity**? | Short-interval polling instead of WebSockets; no options chain, no portfolio P&L, no ML sentiment model; a fixed, curated NSE universe instead of open-ended ticker search (makes "add symbol" a validated autocomplete, not a place invalid input can break the pipeline). |
 
 ## Solving the NSE data problem
 
