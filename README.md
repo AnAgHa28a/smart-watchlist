@@ -1,88 +1,59 @@
-# Signal — a watchlist that tells you what changed, not just what things cost
+# Signal — a smarter stock watchlist
 
 **Live demo:** https://smart-watchlist-six.vercel.app
-**API:** https://smart-watchlist-6nja.onrender.com (backend spins down after inactivity on the free tier — first request after a while can take ~50s to wake up)
+**API:** https://smart-watchlist-6nja.onrender.com (free tier, sleeps when idle — first request after a while can take ~50s to wake up)
 
-Most watchlists show you numbers. Signal shows you *significance*: it ranks
-every stock you follow by how unusual today's behavior actually is for
-*that stock*, remembers what you'd already seen, and tells you — in plain
-language — what's genuinely worth your attention since you last looked.
+Most watchlists just show you prices. Signal ranks each stock by how unusual its behavior actually is, remembers what you last saw, and tells you in plain language what's actually worth a look today.
 
-Built for the Groww hackathon brief: *"Build a smart market watchlist that
-helps users understand what has meaningfully changed since they last
-checked."*
+Built for Groww's hackathon brief: a watchlist that shows what's meaningfully changed since you last checked.
 
 ### Jump to
-[The core idea](#the-core-idea) · [Non-obvious choices](#three-deliberate-non-obvious-choices) · [Beyond the watchlist](#beyond-the-watchlist-itself) · [Architecture](#architecture) · [The brief's questions, answered](#answering-the-briefs-you-decide-points-directly) · [NSE data problem](#solving-the-nse-data-problem) · [Setup](#setup) · [100-word pitch](#the-100-word-pitch)
+[The core idea](#the-core-idea) · [Non-obvious choices](#three-deliberate-choices) · [Beyond the watchlist](#beyond-the-watchlist-itself) · [Architecture](#architecture) · [The brief's questions, answered](#answering-the-briefs-questions-directly) · [NSE data problem](#solving-the-nse-data-problem) · [Setup](#setup) · [100-word pitch](#the-100-word-pitch)
 
-### Four things worth knowing before you dig in
+### A few things worth knowing going in
 
-| # | This isn't... | It's... |
-|---|---|---|
-| 1 | ...a live-price dashboard | **A diff.** A server-persisted snapshot of what you saw last time, diffed against now, on every visit, across devices. Prices are the input; the digest is the point. |
-| 2 | ...a scoring formula you take on faith | **A backtest.** [`services/backtest.py`](backend/app/services/backtest.py) replays the live scoring function across a year of real prices (no lookahead) and grades every flag it raises. 70+ score flags show a measurably *higher* hit rate than 30–50 score ones — see **Track record** in the live app. |
-| 3 | ...pretending free real-time NSE data exists | **A handled constraint.** Confirmed directly: `nseindia.com` returns `403` even with a proper browser User-Agent. The system cascades sources with a circuit breaker and stays honest about staleness — see [*Solving the NSE data problem*](#solving-the-nse-data-problem). |
-| 4 | ...a localhost screenshot | **Actually deployed.** Live link, real Postgres, real session auth — tested end-to-end including a full page reload to prove session persistence. |
+- **The core feature is a diff.** Every visit, the backend compares what you're seeing now against a snapshot of what you saw last time, stored server-side, and shows you only what's actually new.
+- **The score is backtested.** [`backtest.py`](backend/app/services/backtest.py) replays the same scoring function across a year of real prices and grades every flag it would have raised. Higher-confidence flags really do hold up better — see **Track record** in the app.
+- **NSE doesn't have a usable free API, so I dealt with that head-on.** `nseindia.com` blocks even a proper browser request. Prices come through a source cascade with a circuit breaker, and stale data always gets labeled.
+- **It's live.** Real Postgres, real login, tested end to end.
 
 ---
 
 ## The core idea
 
-A stock moving 0.5% is noise for a stable large-cap and a real signal for a
-low-volatility one. So instead of a flat `% change` column, every symbol
-gets an **Attention Score (0–100)**, computed from four signals normalized
-against *that stock's own* recent behavior:
+A 0.5% move means nothing for a stable large-cap but could matter a lot for a quieter stock. So instead of a flat % change, every stock gets an **Attention Score (0–100)** based on how it's behaving relative to its own history:
 
 | Signal | What it measures |
 |---|---|
-| Z-score of today's move | Today's return ÷ the stock's own trailing daily-volatility — not a hardcoded "±2%" rule |
-| Volume ratio | Today's volume vs. its 20-day average — is this move backed by real participation? |
-| 52-week level crossing | Is the price near a structural high/low? |
-| Gap % | How far did it jump between yesterday's close and today's open? |
+| Z-score of today's move | Today's return vs. the stock's own volatility — not a fixed "±2%" cutoff |
+| Volume ratio | Today's volume vs. its 20-day average |
+| 52-week level crossing | Whether the price is near a structural high or low |
+| Gap % | The jump between yesterday's close and today's open |
 
-These combine into the score. Separately — and this is the actual product,
-not just the algorithm — every time you view your watchlist, the backend
-**diffs the current state against a snapshot of what you saw last time**
-(stored server-side, per user, per symbol) and surfaces only what's
-*new since then* in a "Since you last checked" digest, written as a short
-plain-language brief above the ranked list.
+That's the algorithm. The actual product is what happens next: every time you open your watchlist, the backend compares it to a snapshot of what you saw last time and writes a short summary of what's genuinely new, above the ranked list.
 
-## Three deliberate, non-obvious choices
+## Three deliberate choices
 
-**1. Conviction tiers, not one global sensitivity.** Each symbol is tagged
-`Core` (long-term holding — only flag structural moves: 52-week breaks, big
-volume) or `Trading` (flag smaller intraday moves too). The *same* 1% move
-is noise on a Core holding and a signal on a Trading one — the definition
-of "meaningful" is personalized per stock, per user, not one-size-fits-all.
+**1. Conviction tiers.** Tag a stock `Core` (long-term — only flag big structural moves) or `Trading` (flag smaller moves too). The same 1% move means something different depending on the tag, because "meaningful" isn't the same for every stock or every person.
 
-**2. Sector-relative move clustering.** Every move is compared against its
-sector peers' average move that same day (a static NIFTY sector map,
-[`nifty_universe.json`](backend/app/data/nifty_universe.json)). If four IT
-stocks drop 2% together, that's tagged *sector-wide — likely market noise*.
-If one stock moves alone against a flat sector, it's tagged *idiosyncratic —
-worth a look*. Turns a raw number into a causal read.
+**2. Sector-relative clustering.** Every move gets compared to how its sector did that same day. Four IT stocks all down 2% together is market noise. One stock down 2% alone is worth a look. Uses a static NIFTY sector map ([`nifty_universe.json`](backend/app/data/nifty_universe.json)).
 
-**3. A grounded natural-language digest.** The "Since you last checked"
-panel isn't just cards — it's a short narrative brief, template-generated by
-default (zero external dependency risk for a live demo) with an optional
-LLM rewrite layered on top when `ANTHROPIC_API_KEY` is set, strictly
-grounded in the same computed facts (never free to invent numbers).
+**3. A grounded digest.** The "since you last checked" summary is templated by default — no external dependency to break during a demo — with an optional LLM rewrite when `ANTHROPIC_API_KEY` is set. Either way, it can only describe facts already computed, never invent numbers.
 
 ## Beyond the watchlist itself
 
-Eight additions, ranked by how rare they are in a typical watchlist — the
-first two are the ones worth reading closely if you're short on time:
+Eight smaller additions. The first two are the ones I'd point you to first:
 
-| Feature | Why it's there, not just decoration |
+| Feature | Why it's there |
 |---|---|
-| **Self-graded track record** | [`backtest.py`](backend/app/services/backtest.py) replays the *exact* live scoring function across a year of real prices and grades every flag against what actually happened next. Fully populated on day one (not an empty promise), and keeps grading new live flags the same way. Result: 70+ score flags show a meaningfully higher continuation rate than 30–50 ones — evidence the score isn't noise. |
-| **Cross-stock correlation** | The sector-concentration warning catches "80% of your list is IT." It can't catch two stocks in *different* sectors that still move together most days. Real pairwise correlation of daily returns, computed from data already stored for the sparkline — no new data — flags pairs above 0.7. |
-| **Market Pulse** | A personal watchlist can only answer "how are *my* stocks doing." Since the poller already tracks the full ~80-symbol universe regardless of anyone's list (see [scaling](#answering-the-briefs-you-decide-points-directly)), this surfaces sector-wide moves and the most unusual movers overall — for free. |
-| **Sector concentration risk** | Watchlist composition as a part-to-whole bar; a callout names the risk explicitly once one sector crosses ~50% — a diversification question a bare price list never raises. |
-| **Custom per-stock alerts** | Price or volume-spike triggers layered on the Core/Trading tiers, evaluated once per poll cycle against the shared cache — same O(universe) scaling as the rest of the poller. |
-| **Real sparklines** | Free byproduct of the volatility backfill (a year of daily closes, previously discarded right after computing the stdev) — real historical data, not a placeholder squiggle. |
-| **Per-stock drill-down** | Expanding a row shows the actual mechanics: 52-week range position, a volatility meter, a volume meter, relative strength vs. sector — the score is never a black box. |
-| **"Extended move" flag** | When a z-score exceeds ~2.5σ, a plain note that such moves regress toward the mean more often than they extend further — a framing hint, not a prediction. |
+| **Self-graded track record** | Runs the scoring function against a year of real prices to see how it would've actually done. Higher-confidence flags do hold up better than lower-confidence ones — the score isn't just noise. |
+| **Cross-stock correlation** | Sector tags catch the obvious overlap ("80% IT"), but miss two stocks in different sectors that still move together. This checks the real correlation in their price history. |
+| **Market Pulse** | Shows how every tracked sector is doing today, not just your own list — tells you if a move is market-wide or specific to your stock. |
+| **Sector concentration warning** | Flags it when one sector makes up over half your watchlist. |
+| **Custom alerts** | Set a price or volume trigger per stock, on top of the Core/Trading tiers. |
+| **Real sparklines** | Pulled from the year of price history already fetched for volatility, not a decorative chart. |
+| **Per-stock drill-down** | Click a row to see the 52-week range, volatility, volume, and how it's doing versus its sector. |
+| **Extended-move flag** | Flags large statistical outliers (>2.5σ) with a note that these often partly reverse — a framing hint, not a prediction. |
 
 ## Architecture
 
@@ -129,67 +100,37 @@ first two are the ones worth reading closely if you're short on time:
                     └───────────────────────────┘
 ```
 
-**Backend:** Python, FastAPI, Postgres (SQLAlchemy). **Frontend:** React +
-Vite + TypeScript + Tailwind. **Auth:** email/password, JWT in an httpOnly
-cookie — real accounts, not local-storage state, because "state persists
-across devices" is a server problem, not a client one.
+**Backend:** Python, FastAPI, Postgres (SQLAlchemy). **Frontend:** React, Vite, TypeScript, Tailwind. **Auth:** email/password, JWT in an httpOnly cookie — a real account, since syncing across devices is a server problem, not a browser one.
 
-## Answering the brief's "you decide" points directly
+## Answering the brief's questions directly
 
-The brief lists six things it deliberately leaves open. Here's the direct
-answer to each, in the same order:
+The brief leaves six things open. Here's the direct answer to each:
 
 | The brief asks... | Our answer |
 |---|---|
-| What counts as a **meaningful change**? | A volatility-adjusted composite score ([`attention_score.py`](backend/app/services/attention_score.py)), thresholded differently per conviction tier — not a flat % rule. |
-| What **information to surface**? | Not a bare price — *why* it's flagged: one generated sentence per stock (`"Up 3.2%, 2.8x its usual daily move, on 4x average volume, near its 52-week high."`), plus the sector-relative tag. |
-| How does **state persist across sessions/devices**? | Server-side Postgres, keyed by user id, not device. Log in anywhere, see the same watchlist and the same diff-since-last-seen state ([`UserSymbolCheckpoint`](backend/app/models.py)). |
-| How to handle **stale/delayed/conflicting data**? | A source cascade with a circuit breaker (see [below](#solving-the-nse-data-problem)); every price is labeled live/stale rather than silently wrong. |
-| How does the system **scale**? | One poller tracks the fixed symbol universe regardless of user count — `O(universe)`, not `O(users × watchlist size)`. Every client reads a shared DB-backed cache instead of triggering its own fetch; the diff-vs-live endpoint split means the frequent polling loop never touches write-heavy checkpoint state. |
-| Where to keep it **simple vs. add complexity**? | Short-interval polling instead of WebSockets; no options chain, no portfolio P&L, no ML sentiment model; a fixed, curated NSE universe instead of open-ended ticker search (makes "add symbol" a validated autocomplete, not a place invalid input can break the pipeline). |
+| What counts as a **meaningful change**? | A volatility-adjusted score ([`attention_score.py`](backend/app/services/attention_score.py)), thresholded differently per conviction tier. |
+| What **information to surface**? | Not just a price — a plain sentence explaining why it's flagged (e.g. "Up 3.2%, 2.8x its usual move, near its 52-week high"), plus the sector context. |
+| How does **state persist across sessions/devices**? | Server-side Postgres, keyed by user id. Log in anywhere and see the same watchlist and the same "last seen" state ([`UserSymbolCheckpoint`](backend/app/models.py)). |
+| How to handle **stale/delayed/conflicting data**? | A source cascade with a circuit breaker (details [below](#solving-the-nse-data-problem)). Every price is labeled live or stale, never silently wrong. |
+| How does the system **scale**? | One poller tracks the fixed symbol universe no matter how many users sign up — cost scales with the universe, not with users × watchlists. Every client reads a shared cache instead of triggering its own fetch. |
+| Where to keep it **simple vs. add complexity**? | Polling instead of WebSockets, a curated symbol list instead of open search, no options chain or portfolio P&L or ML model — each a deliberate cut to fit the time box. |
 
 ## Solving the NSE data problem
 
-There is no free, reliable, real-time NSE-direct data source — confirmed
-directly while building this: `nseindia.com` returns `403` even with a
-proper browser User-Agent (Akamai bot detection blocks non-browser clients,
-and this is *worse*, not better, from a cloud host's IP range than from a
-residential one). Rather than pretend otherwise, the design treats this as
-a first-class constraint:
+There's no free, reliable, real-time NSE data source — confirmed directly while building this: `nseindia.com` returns `403` even with a normal browser User-Agent. Rather than pretend otherwise, this is treated as a real constraint:
 
-1. **Cascading sources.** NSE's own live quote endpoint is attempted first
-   (lowest latency if it ever works) → Yahoo Finance's public chart JSON
-   endpoint, called directly over HTTPS (not through the `yfinance` package
-   — verified during build that a plain `httpx` GET with a browser
-   User-Agent returns clean data; this is the real backbone) → the last
-   known-good value from Postgres, explicitly marked stale.
-2. **A circuit breaker per source** ([`circuit_breaker.py`](backend/app/services/circuit_breaker.py))
-   so a source that's currently failing gets skipped for a cooldown window
-   instead of hammered every poll tick — visible live at `GET /system/status`.
-3. **Statistical baseline from the same Yahoo endpoint**, not NSE's Bhavcopy
-   archives (equally unreachable in practice): one `range=1y` call per
-   symbol backfills a full year of daily OHLCV, seeding volatility / 52-week
-   high-low / average-volume — so the score is statistically grounded from
-   day one instead of showing "insufficient history" for new symbols.
+1. **Cascading sources.** NSE's own quote endpoint is tried first, then Yahoo Finance's chart API (called directly over HTTPS, not through the `yfinance` package — a plain `httpx` request with a browser header works fine and is more reliable), then the last known-good value from Postgres, marked stale.
+2. **A circuit breaker per source** ([`circuit_breaker.py`](backend/app/services/circuit_breaker.py)) so a failing source gets skipped for a cooldown instead of hammered every cycle — visible live at `GET /system/status`.
+3. **A statistical baseline from the same Yahoo endpoint**, not NSE's Bhavcopy archives (also unreachable in practice). One `range=1y` call per symbol backfills a year of daily prices, so volatility and 52-week range are grounded from day one instead of showing "not enough history."
 
 ## Why polling over WebSockets
 
-A deliberate simplicity call, not an oversight. A single naive polling
-endpoint would also silently mark every symbol "seen" on every tick,
-collapsing the "since you last checked" digest to empty within seconds of
-loading the page — so the backend exposes two endpoints instead of one:
+A deliberate simplicity call. A single naive polling endpoint would mark every symbol "seen" on every tick, collapsing the digest to empty within seconds — so there are two endpoints instead of one:
 
-- `GET /watchlist` — a **visit**: diffs against and then advances the
-  user's checkpoints, computes the digest. Called on page load and when the
-  tab regains focus after being away.
-- `GET /watchlist/live` — a **passive refresh**: current prices/scores only,
-  never touches checkpoints. Polled every ~10s while the tab is visible to
-  keep numbers ticking without ever disturbing what "since you last
-  checked" means.
+- `GET /watchlist` — a **visit**. Diffs against and advances the checkpoint, computes the digest. Called on page load and when the tab regains focus.
+- `GET /watchlist/live` — a **passive refresh**. Current prices only, never touches the checkpoint. Polled every ~10s to keep numbers ticking without disturbing what "since you last checked" means.
 
-WebSockets would add real-time polish; this gets ~95% of the UX with far
-less deployment risk in a hard time box, and the scaling design (single
-shared poller + shared cache) doesn't depend on push transport either way.
+WebSockets would add real polish, but this gets most of the benefit with far less deployment risk, and the scaling design doesn't depend on push transport either way.
 
 ---
 
@@ -205,13 +146,9 @@ cp .env.example .env   # fill in DATABASE_URL at minimum
 uvicorn app.main:app --reload
 ```
 
-Requires Python 3.11–3.13 (not 3.14 yet — `pydantic-core`/`psycopg2` don't
-have prebuilt wheels for it as of this build) and a Postgres database
-(local `postgres://localhost/watchlist` works fine, or a free Neon/Supabase
-instance for deployment).
+Needs Python 3.11–3.13 (not 3.14 yet — some dependencies don't have prebuilt wheels) and a Postgres database (local, or a free Neon/Supabase instance).
 
-`ANTHROPIC_API_KEY` is optional — omit it and the digest narrative falls
-back to the rule-based template automatically.
+`ANTHROPIC_API_KEY` is optional — leave it out and the digest falls back to the template automatically.
 
 ### Frontend
 
@@ -224,50 +161,21 @@ npm run dev
 
 ### Deploying
 
-Deployed here on Render (backend) + Vercel (frontend) + Neon (Postgres),
-all free tier:
+Deployed here on Render (backend) + Vercel (frontend) + Neon (Postgres), all free tier:
 
-- **Neon** → create a project, copy the connection string into
-  `DATABASE_URL`.
-- **Render** → New Web Service, Docker runtime. Set **Dockerfile Path** to
-  `backend/Dockerfile` and **Docker Build Context Directory** to `backend`
-  explicitly (leaving only "Root Directory" set was unreliable — it built
-  against the repo root and couldn't find the Dockerfile). Env vars:
-  `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS` (the Vercel origin, added
-  after the frontend is deployed), `COOKIE_SECURE=true`,
-  `COOKIE_SAMESITE=none`. Render's free web services now require a card on
-  file (fraud prevention) even though the tier itself is $0.
-- **Vercel** → import the repo with Root Directory `frontend`, framework
-  preset auto-detects Vite. Set `VITE_API_URL` to the Render URL. Needs a
-  `vercel.json` rewrite (`/(.*) → /index.html`, already included) — without
-  it, direct navigation to a client-side route like `/login` 404s, since
-  Vercel otherwise looks for a literal file at that path.
-- Both Render and Vercel auto-redeploy on every push to `main` — Render
-  redeploys the backend even for a frontend-only commit since it isn't
-  scoped to `backend/`; harmless (same image), just an extra build.
+- **Neon** — create a project, copy the connection string into `DATABASE_URL`.
+- **Render** — New Web Service, Docker runtime. Set **Dockerfile Path** to `backend/Dockerfile` and **Docker Build Context Directory** to `backend` explicitly (Root Directory alone wasn't reliable — it built against the repo root and couldn't find the Dockerfile). Env vars: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE=none`. Render's free tier now asks for a card on file even though it's $0.
+- **Vercel** — import with Root Directory `frontend`; Vite is auto-detected. Set `VITE_API_URL` to the Render URL. Needs the included `vercel.json` rewrite, or direct navigation to routes like `/login` 404s.
+- Both auto-redeploy on every push to `main` — Render rebuilds even for frontend-only commits, which is harmless, just an extra build.
 
 ## What I'd add with more time
 
-- An NSE holiday calendar (market-hours detection is currently
-  weekday+time only — a documented simplification, not a bug: it can be a
-  little imprecise around holidays, never wrong about prices).
-- WebSocket push for true real-time ticking instead of polling.
-- Push/email delivery for triggered alerts and structural Core-holding
-  moves — the triggers themselves exist (custom alert rules, evaluated
-  every poll cycle) and surface in-app, but there's no out-of-band delivery
-  yet for while you're away from the tab.
+- An NSE holiday calendar — market hours are currently weekday + time only, which is fine 99% of the time but can be a little off around holidays.
+- WebSocket push for true real-time ticking.
+- Push/email delivery for alerts. The triggers exist and surface in-app, but there's no way to notify you while you're away from the tab.
 
 ---
 
 ## The 100-word pitch
 
-Signal is a watchlist that answers one question: what actually deserves my
-attention right now? Every stock gets an Attention Score — its move judged
-against its *own* volatility, volume, and sector peers, not a flat %
-threshold. A server-persisted checkpoint per user powers a genuine "since
-you last checked" digest across devices. The standout: a backtest replays
-the same scoring algorithm across a year of real prices, so its hit rate is
-shown honestly, not just asserted — high-confidence flags measurably
-outperform low-confidence ones. Built around a hard truth: free real-time
-NSE data doesn't really exist, so the system cascades sources and stays
-honest about staleness rather than silently wrong.
+Signal is a watchlist built around one question: what actually deserves my attention today? Each stock gets an Attention Score based on its own volatility, volume, and how its sector is doing — not a flat percentage cutoff. A server-side checkpoint per user powers a real "since you last checked" summary across devices. The part I'm proudest of: a backtest that replays the same algorithm across a year of real prices, so you can see its hit rate — higher-confidence flags do better than lower ones. It's also built around a real constraint: free real-time NSE data doesn't exist, so the system pulls from multiple sources and is upfront when data is stale.
