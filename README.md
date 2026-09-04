@@ -10,7 +10,7 @@ Built for Groww's hackathon brief: a watchlist that shows what's meaningfully ch
 ### Jump to
 [The core idea](#the-core-idea) · [Non-obvious choices](#three-deliberate-choices) · [Beyond the watchlist](#beyond-the-watchlist-itself) · [Architecture](#architecture) · [The brief's questions, answered](#answering-the-briefs-questions-directly) · [NSE data problem](#solving-the-nse-data-problem) · [Setup](#setup) · [100-word pitch](#the-100-word-pitch)
 
-### A few things worth knowing going in
+### A few things worth knowing
 
 - **The core feature is a diff.** Every visit, the backend compares what you're seeing now against a snapshot of what you saw last time, stored server-side, and shows you only what's actually new.
 - **The score is backtested.** [`backtest.py`](backend/app/services/backtest.py) replays the same scoring function across a year of real prices and grades every flag it would have raised. Higher-confidence flags really do hold up better — see **Track record** in the app.
