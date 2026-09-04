@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { ConvictionTier, WatchlistEntry } from "../types";
 import FreshnessBadge from "./FreshnessBadge";
 import ScoreMeter from "./ScoreMeter";
-import Sparkline from "./Sparkline";
 import RowDetail from "./RowDetail";
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -75,23 +74,21 @@ export default function WatchlistRow({
           )}
         </div>
 
-        <div className="w-20 shrink-0 hidden sm:block">
-          {entry.sparkline ? <Sparkline values={entry.sparkline} width={72} height={26} /> : <span className="text-slate-700 text-xs">—</span>}
-        </div>
-
         <div className="w-28 shrink-0">
           <ScoreMeter score={entry.attention_score} />
         </div>
 
-        <div className="flex-1 min-w-0" title={entry.signals?.explanation}>
-          <p className="text-xs text-slate-400 truncate whitespace-nowrap">{entry.signals?.explanation}</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-slate-400 leading-snug" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {entry.signals?.explanation}
+          </p>
           {entry.signals?.sector_relative && (
-            <span className={`text-[10px] mt-0.5 inline-block whitespace-nowrap truncate max-w-full ${entry.signals.sector_relative === "sector-wide" ? "text-slate-500" : "text-amber-400"}`}>
+            <span className={`text-[10px] mt-0.5 inline-block ${entry.signals.sector_relative === "sector-wide" ? "text-slate-500" : "text-amber-400"}`}>
               {entry.signals.sector_relative === "sector-wide" ? "Sector-wide move" : "Moving alone vs. sector"}
             </span>
           )}
           {entry.insufficient_history && (
-            <span className="text-[10px] mt-0.5 inline-block whitespace-nowrap text-slate-600">Building history…</span>
+            <span className="text-[10px] mt-0.5 inline-block text-slate-600">Building history…</span>
           )}
         </div>
 
