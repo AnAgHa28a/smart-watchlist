@@ -1,5 +1,8 @@
 # Signal — a watchlist that tells you what changed, not just what things cost
 
+**Live demo:** https://smart-watchlist-six.vercel.app
+**API:** https://smart-watchlist-6nja.onrender.com (backend spins down after inactivity on the free tier — first request after a while can take ~50s to wake up)
+
 Most watchlists show you numbers. Signal shows you *significance*: it ranks
 every stock you follow by how unusual today's behavior actually is for
 *that stock*, remembers what you'd already seen, and tells you — in plain
@@ -211,12 +214,27 @@ npm run dev
 
 ### Deploying
 
-- **Backend** → Render/Fly/Railway (Dockerfile included), with a Postgres
-  add-on (or Neon/Supabase). Set `DATABASE_URL`, `JWT_SECRET`,
-  `CORS_ORIGINS` (your frontend's deployed origin), `COOKIE_SECURE=true`,
-  `COOKIE_SAMESITE=none`.
-- **Frontend** → Vercel/Netlify. Set `VITE_API_URL` to the deployed backend
-  URL.
+Deployed here on Render (backend) + Vercel (frontend) + Neon (Postgres),
+all free tier:
+
+- **Neon** → create a project, copy the connection string into
+  `DATABASE_URL`.
+- **Render** → New Web Service, Docker runtime. Set **Dockerfile Path** to
+  `backend/Dockerfile` and **Docker Build Context Directory** to `backend`
+  explicitly (leaving only "Root Directory" set was unreliable — it built
+  against the repo root and couldn't find the Dockerfile). Env vars:
+  `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS` (the Vercel origin, added
+  after the frontend is deployed), `COOKIE_SECURE=true`,
+  `COOKIE_SAMESITE=none`. Render's free web services now require a card on
+  file (fraud prevention) even though the tier itself is $0.
+- **Vercel** → import the repo with Root Directory `frontend`, framework
+  preset auto-detects Vite. Set `VITE_API_URL` to the Render URL. Needs a
+  `vercel.json` rewrite (`/(.*) → /index.html`, already included) — without
+  it, direct navigation to a client-side route like `/login` 404s, since
+  Vercel otherwise looks for a literal file at that path.
+- Both Render and Vercel auto-redeploy on every push to `main` — Render
+  redeploys the backend even for a frontend-only commit since it isn't
+  scoped to `backend/`; harmless (same image), just an extra build.
 
 ## What I'd add with more time
 
