@@ -56,6 +56,38 @@ default (zero external dependency risk for a live demo) with an optional
 LLM rewrite layered on top when `ANTHROPIC_API_KEY` is set, strictly
 grounded in the same computed facts (never free to invent numbers).
 
+## Beyond the watchlist itself
+
+**Market Pulse.** A personal watchlist can only ever answer "how are *my*
+stocks doing" — it can't tell you whether today's move is a you-problem or a
+market-wide one. Since the poller already tracks the full ~80-symbol NSE
+universe regardless of anyone's watchlist (see Scaling below), this is free
+to surface: a diverging chart of today's average move per sector across the
+*entire* tracked market, plus the most statistically unusual movers overall —
+context no per-user watchlist could give on its own.
+
+**Sector concentration risk.** The watchlist composition is visualized as a
+part-to-whole bar, and if one sector crosses ~50% of the list, a callout
+names the risk explicitly: a sector-wide move would swing most of the list at
+once. This is a smart-watchlist question ("should I even be worried about
+diversification here") that a bare price list never raises.
+
+**Real sparklines, not decoration.** The statistical backfill already fetches
+a year of daily closes per symbol to compute volatility — previously that
+series was discarded right after computing the number. It's now persisted
+(trimmed to the trailing ~60 sessions) and rendered directly, so every chart
+in the product is backed by real historical data, not a placeholder squiggle.
+
+**An "extended move" flag.** When a stock's z-score exceeds ~2.5σ, it's
+labeled a statistical outlier with a plain note that such moves regress
+toward the mean more often than they extend further — a framing hint, not a
+prediction, but the kind of context a raw % figure never carries.
+
+**Per-stock drill-down.** Expanding a row shows the actual mechanics behind
+its score: a 52-week range position indicator, a volatility meter, a volume
+meter, and relative strength vs. its sector today — so the Attention Score
+is never a black box.
+
 ## Architecture
 
 ```
