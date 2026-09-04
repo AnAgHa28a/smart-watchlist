@@ -12,6 +12,13 @@ Built for the Groww hackathon brief: *"Build a smart market watchlist that
 helps users understand what has meaningfully changed since they last
 checked."*
 
+**The four things worth knowing before you dig in:**
+
+1. **The product is a diff, not a dashboard.** The core mechanic isn't "show live prices" — it's a server-persisted snapshot of what you saw last time, diffed against now, on every visit, across devices. Prices are the input; the digest is the point.
+2. **The score is a backtest, not a guess.** [`services/backtest.py`](backend/app/services/backtest.py) replays the live scoring function across a year of real historical prices (no lookahead) and grades every flag it would have raised. The result: 70+ score flags show a measurably higher continuation rate than 30-50 score ones — the algorithm is checked against reality, not just asserted. See **Track record** in the live app.
+3. **A real production constraint, handled, not hidden.** Free real-time NSE data doesn't exist — confirmed directly (`nseindia.com` returns `403` even with a proper browser User-Agent). The system cascades sources with a circuit breaker and is always honest about staleness instead of quietly wrong. See *Solving the NSE data problem* below.
+4. **It's actually deployed and it actually works.** Not a localhost screenshot — a live link, a real Postgres database, real session auth, tested end-to-end including a full page reload to prove session persistence.
+
 ---
 
 ## The core idea
@@ -58,36 +65,6 @@ grounded in the same computed facts (never free to invent numbers).
 
 ## Beyond the watchlist itself
 
-**Market Pulse.** A personal watchlist can only ever answer "how are *my*
-stocks doing" — it can't tell you whether today's move is a you-problem or a
-market-wide one. Since the poller already tracks the full ~80-symbol NSE
-universe regardless of anyone's watchlist (see Scaling below), this is free
-to surface: a diverging chart of today's average move per sector across the
-*entire* tracked market, plus the most statistically unusual movers overall —
-context no per-user watchlist could give on its own.
-
-**Sector concentration risk.** The watchlist composition is visualized as a
-part-to-whole bar, and if one sector crosses ~50% of the list, a callout
-names the risk explicitly: a sector-wide move would swing most of the list at
-once. This is a smart-watchlist question ("should I even be worried about
-diversification here") that a bare price list never raises.
-
-**Real sparklines, not decoration.** The statistical backfill already fetches
-a year of daily closes per symbol to compute volatility — previously that
-series was discarded right after computing the number. It's now persisted
-(trimmed to the trailing ~60 sessions) and rendered directly, so every chart
-in the product is backed by real historical data, not a placeholder squiggle.
-
-**An "extended move" flag.** When a stock's z-score exceeds ~2.5σ, it's
-labeled a statistical outlier with a plain note that such moves regress
-toward the mean more often than they extend further — a framing hint, not a
-prediction, but the kind of context a raw % figure never carries.
-
-**Per-stock drill-down.** Expanding a row shows the actual mechanics behind
-its score: a 52-week range position indicator, a volatility meter, a volume
-meter, and relative strength vs. its sector today — so the Attention Score
-is never a black box.
-
 **A self-graded track record.** Most products just assert their signal is
 good. This one shows it: [`services/backtest.py`](backend/app/services/backtest.py)
 replays the exact same scoring function day-by-day across a year of real
@@ -109,10 +86,41 @@ stored for the sparkline — pure computation, no new data — and flags pairs
 above 0.7, prioritizing cross-sector matches since same-sector correlation
 is already explained by the allocation widget.
 
+**Market Pulse.** A personal watchlist can only ever answer "how are *my*
+stocks doing" — it can't tell you whether today's move is a you-problem or a
+market-wide one. Since the poller already tracks the full ~80-symbol NSE
+universe regardless of anyone's watchlist (see "How the system scales"
+below), this is free
+to surface: a diverging chart of today's average move per sector across the
+*entire* tracked market, plus the most statistically unusual movers overall —
+context no per-user watchlist could give on its own.
+
+**Sector concentration risk.** The watchlist composition is visualized as a
+part-to-whole bar, and if one sector crosses ~50% of the list, a callout
+names the risk explicitly: a sector-wide move would swing most of the list at
+once. This is a smart-watchlist question ("should I even be worried about
+diversification here") that a bare price list never raises.
+
 **Custom per-stock alerts.** Layered on top of the Core/Trading tiers: a
 user can set an explicit price or volume-spike trigger per symbol,
 evaluated once per poll cycle against the shared price cache — the same
 O(universe), not O(users), scaling principle as the rest of the poller.
+
+**Real sparklines, not decoration.** The statistical backfill already fetches
+a year of daily closes per symbol to compute volatility — previously that
+series was discarded right after computing the number. It's now persisted
+(trimmed to the trailing ~60 sessions) and rendered directly, so every chart
+in the product is backed by real historical data, not a placeholder squiggle.
+
+**Per-stock drill-down.** Expanding a row shows the actual mechanics behind
+its score: a 52-week range position indicator, a volatility meter, a volume
+meter, and relative strength vs. its sector today — so the Attention Score
+is never a black box.
+
+**An "extended move" flag.** When a stock's z-score exceeds ~2.5σ, it's
+labeled a statistical outlier with a plain note that such moves regress
+toward the mean more often than they extend further — a framing hint, not a
+prediction, but the kind of context a raw % figure never carries.
 
 ## Architecture
 
