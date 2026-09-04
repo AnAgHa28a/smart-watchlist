@@ -88,6 +88,32 @@ its score: a 52-week range position indicator, a volatility meter, a volume
 meter, and relative strength vs. its sector today — so the Attention Score
 is never a black box.
 
+**A self-graded track record.** Most products just assert their signal is
+good. This one shows it: [`services/backtest.py`](backend/app/services/backtest.py)
+replays the exact same scoring function day-by-day across a year of real
+historical prices per symbol — careful to only use data available as of
+each simulated day, no lookahead — and grades every flag against what
+actually happened over the next 5 sessions. Because it's a real backtest
+against real history, the scorecard is fully populated on day one instead
+of starting empty, and it keeps grading new live flags the same way going
+forward. The result is genuinely informative, not cherry-picked: overall
+hit rate is roughly a coin flip, but the algorithm's *highest-confidence*
+flags (score 70+) show a meaningfully higher continuation rate than its
+low-confidence ones — evidence the score isn't just noise.
+
+**Cross-stock correlation detection.** The sector-concentration warning
+catches "80% of your list is IT." It can't catch two stocks in *different*
+sectors that still move together most days. This computes real pairwise
+correlation of daily returns from the same close-price history already
+stored for the sparkline — pure computation, no new data — and flags pairs
+above 0.7, prioritizing cross-sector matches since same-sector correlation
+is already explained by the allocation widget.
+
+**Custom per-stock alerts.** Layered on top of the Core/Trading tiers: a
+user can set an explicit price or volume-spike trigger per symbol,
+evaluated once per poll cycle against the shared price cache — the same
+O(universe), not O(users), scaling principle as the rest of the poller.
+
 ## Architecture
 
 ```
@@ -274,8 +300,10 @@ all free tier:
   weekday+time only — a documented simplification, not a bug: it can be a
   little imprecise around holidays, never wrong about prices).
 - WebSocket push for true real-time ticking instead of polling.
-- Push/email alerts when a Core holding crosses a structural threshold
-  while you're away, instead of only surfacing on next visit.
+- Push/email delivery for triggered alerts and structural Core-holding
+  moves — the triggers themselves exist (custom alert rules, evaluated
+  every poll cycle) and surface in-app, but there's no out-of-band delivery
+  yet for while you're away from the tab.
 
 ---
 
