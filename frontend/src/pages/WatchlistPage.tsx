@@ -2,18 +2,21 @@ import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useWatchlist } from "../hooks/useWatchlist";
 import { useMarketPulse } from "../hooks/useMarketPulse";
+import { useTrackRecord } from "../hooks/useTrackRecord";
 import { api } from "../api/client";
 import DigestPanel from "../components/DigestPanel";
 import WatchlistRow from "../components/WatchlistRow";
 import AddSymbolModal from "../components/AddSymbolModal";
 import SectorAllocation from "../components/SectorAllocation";
 import MarketPulsePanel from "../components/MarketPulsePanel";
+import TrackRecordPanel from "../components/TrackRecordPanel";
 import type { ConvictionTier } from "../types";
 
 export default function WatchlistPage() {
   const { user, logout } = useAuth();
   const { data, loading, error, revisit } = useWatchlist();
   const pulse = useMarketPulse();
+  const trackRecord = useTrackRecord();
   const [showAddModal, setShowAddModal] = useState(false);
 
   const handleRemove = async (symbol: string) => {
@@ -59,6 +62,8 @@ export default function WatchlistPage() {
             <DigestPanel digest={data.digest} narrative={data.digest_narrative} marketOpen={data.market_open} />
 
             {pulse && <MarketPulsePanel pulse={pulse} />}
+
+            {trackRecord && <TrackRecordPanel data={trackRecord} />}
 
             {data.insights && data.items.length > 0 && <SectorAllocation insights={data.insights} />}
 

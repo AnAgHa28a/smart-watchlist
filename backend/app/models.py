@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Boolean, ForeignKey,
+    Column, Integer, String, Float, DateTime, Date, Boolean, ForeignKey,
     UniqueConstraint, Enum, JSON,
 )
 from sqlalchemy.orm import relationship
@@ -65,9 +65,11 @@ class PriceSnapshot(Base):
 
 
 class SymbolStats(Base):
-    """Rolling statistical baseline per symbol, seeded from official NSE
-    Bhavcopy EOD archives and refreshed daily. Powers the z-score / volume-ratio
-    / 52w-high-low components of the attention score."""
+    """Rolling statistical baseline per symbol, seeded from a year of daily
+    OHLCV (fetched from Yahoo's chart endpoint — see data_fetch.py for why
+    NSE's own archives aren't a viable source) and refreshed daily. Powers
+    the z-score / volume-ratio / 52w-high-low components of the attention
+    score."""
     __tablename__ = "symbol_stats"
 
     symbol = Column(String, primary_key=True)
@@ -78,12 +80,61 @@ class SymbolStats(Base):
     history_days = Column(Integer, default=0)
     sector = Column(String, nullable=True)
     name = Column(String, nullable=True)
-    # Trimmed trailing window of daily closes (~60 sessions), kept purely for
-    # the sparkline — the backfill call already fetches a full year to
-    # compute volatility, so this is free: no extra request, just persisting
-    # a slice of data we'd otherwise discard.
+    # Trimmed trailing windows (~60 sessions), kept for the price and score
+    # sparklines — both come free from data already fetched/computed during
+    # backfill (see services/backtest.py), no extra requests.
     recent_closes = Column(JSON, nullable=True)
+    recent_scores = Column(JSON, nullable=True)
     last_updated = Column(DateTime, default=datetime.utcnow)
+
+
+class FlagEvent(Base):
+    """One row per (symbol, day) the algorithm judged 'meaningful' — the
+    system's own track record. 'backtest' rows are produced once by
+    replaying the algorithm day-by-day across a year of real historical
+    prices (services/backtest.py — careful to use only data available as of
+    that simulated day, no lookahead); 'live' rows are logged going forward
+    by the poller. Both are graded the same way: did the move continue
+    ~5 trading sessions later, or revert? This is what lets the product
+    show an honest, immediately-populated hit rate instead of an empty
+    promise on day one."""
+    __tablename__ = "flag_events"
+    __table_args__ = (UniqueConstraint("symbol", "event_date", "source", name="uq_flag_event"),)
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    event_date = Column(Date, nullable=False)
+    score = Column(Float, nullable=False)
+    price_at_flag = Column(Float, nullable=False)
+    move_direction = Column(Integer, nullable=False)  # 1 = up, -1 = down, on the flagged day
+    source = Column(String, nullable=False)  # "backtest" | "live"
+    graded = Column(Boolean, default=False)
+    outcome = Column(String, nullable=True)  # "continued" | "reverted" | "flat"
+    forward_return_pct = Column(Float, nullable=True)
+    graded_at = Column(DateTime, nullable=True)
+
+
+class AlertRuleType(str, enum.Enum):
+    price_above = "price_above"
+    price_below = "price_below"
+    volume_multiple = "volume_multiple"
+
+
+class AlertRule(Base):
+    """A user-defined trigger layered on top of the algorithmic score —
+    'alert me specifically if X crosses this price' or 'if volume spikes
+    this hard' — for the cases where a user wants control more direct than
+    the Core/Trading tiers give them."""
+    __tablename__ = "alert_rules"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    symbol = Column(String, nullable=False)
+    rule_type = Column(Enum(AlertRuleType), nullable=False)
+    threshold = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    triggered_at = Column(DateTime, nullable=True)
+    active = Column(Boolean, default=True)
 
 
 class UserSymbolCheckpoint(Base):

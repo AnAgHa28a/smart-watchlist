@@ -160,7 +160,13 @@ async def fetch_prices(symbols: list[str]) -> dict[str, dict]:
 
 async def fetch_historical(symbol: str) -> dict | None:
     """One year of daily OHLCV for a single symbol — used to seed/refresh
-    the statistical baseline (volatility, 52w high/low, avg volume)."""
+    the statistical baseline (volatility, 52w high/low, avg volume) and, via
+    services/backtest.py, to replay the algorithm day-by-day for the
+    self-graded track record. All four series are kept positionally aligned
+    by index (day i's close/open/volume/timestamp) — a previous version
+    filtered volume nulls independently of closes, which could desync the
+    arrays; here a missing open/volume becomes None in place rather than
+    being dropped, so index i always means the same trading day everywhere."""
     try:
         async with httpx.AsyncClient(headers=BROWSER_HEADERS, timeout=8.0) as client:
             _, chart_result = await _fetch_one_yahoo(client, symbol, "1y", "1d")
@@ -175,18 +181,21 @@ async def fetch_historical(symbol: str) -> dict | None:
         quote = chart_result["indicators"]["quote"][0]
         closes = quote.get("close", [])
         volumes = quote.get("volume", [])
+        opens = quote.get("open", [])
         meta = chart_result.get("meta", {})
 
-        clean = [
-            (ts, c, v) for ts, c, v in zip(timestamps, closes, volumes)
+        rows = [
+            (ts, c, o, v) for ts, c, o, v in zip(timestamps, closes, opens, volumes)
             if c is not None
         ]
-        if len(clean) < 2:
+        if len(rows) < 2:
             return None
 
         return {
-            "closes": [c for _, c, _ in clean],
-            "volumes": [v for _, _, v in clean if v is not None],
+            "timestamps": [r[0] for r in rows],
+            "closes": [r[1] for r in rows],
+            "opens": [r[2] for r in rows],
+            "volumes": [r[3] for r in rows],
             "high_52w": meta.get("fiftyTwoWeekHigh"),
             "low_52w": meta.get("fiftyTwoWeekLow"),
             "fetched_at": time.time(),

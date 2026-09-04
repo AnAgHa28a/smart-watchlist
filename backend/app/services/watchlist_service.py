@@ -2,15 +2,16 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import WatchlistItem, PriceSnapshot, SymbolStats, UserSymbolCheckpoint
+from app.models import WatchlistItem, PriceSnapshot, SymbolStats, UserSymbolCheckpoint, AlertRule
 from app.services.attention_score import compute_attention_score, meaningful_for_tier
 from app.services.sector_analysis import compute_sector_avg_moves, classify_sector_relative
+from app.services.correlation import find_correlated_pairs
 from app.services.market_hours import is_market_open
 from app.services.poller import load_universe
 from app.services.digest import generate_digest_narrative
 from app.schemas import (
     WatchlistEntryOut, SignalBreakdown, DigestItem, WatchlistResponse,
-    WatchlistInsights, SectorAllocationEntry,
+    WatchlistInsights, SectorAllocationEntry, CorrelatedPairOut,
 )
 
 # How much the score (or price) must move beyond what the user already saw
@@ -53,6 +54,10 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
         row.symbol: row for row in db.query(UserSymbolCheckpoint)
         .filter(UserSymbolCheckpoint.user_id == user_id, UserSymbolCheckpoint.symbol.in_(symbols)).all()
     } if symbols else {}
+    alerts_by_symbol: dict[str, list[AlertRule]] = {}
+    if symbols:
+        for rule in db.query(AlertRule).filter(AlertRule.user_id == user_id, AlertRule.symbol.in_(symbols)).all():
+            alerts_by_symbol.setdefault(rule.symbol, []).append(rule)
 
     market_open = is_market_open()
     now = datetime.utcnow()
@@ -131,9 +136,12 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
             last_seen_at=checkpoint.last_seen_at if checkpoint else None,
             insufficient_history=score_result.insufficient_history,
             sparkline=stats.recent_closes if stats else None,
+            score_sparkline=stats.recent_scores if stats else None,
             high_52w=stats.high_52w if stats else None,
             low_52w=stats.low_52w if stats else None,
             relative_strength_pct=relative_strength,
+            active_alert_count=sum(1 for r in alerts_by_symbol.get(item.symbol, []) if r.active and not r.triggered_at),
+            triggered_alert_count=sum(1 for r in alerts_by_symbol.get(item.symbol, []) if r.triggered_at),
         )
         results.append(entry)
 
@@ -185,7 +193,7 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
         digest=digest,
         digest_narrative=narrative,
         items=results,
-        insights=_build_insights(items_db, universe),
+        insights=_build_insights(items_db, universe, stats_by_symbol),
     )
 
 
@@ -195,7 +203,13 @@ async def build_watchlist_response(db: Session, user_id: int, touch_checkpoints:
 CONCENTRATION_THRESHOLD_PCT = 50.0
 
 
-def _build_insights(items_db: list[WatchlistItem], universe: dict) -> WatchlistInsights | None:
+MIN_SYMBOLS_FOR_CORRELATION = 2
+MAX_CORRELATED_PAIRS_SHOWN = 5
+
+
+def _build_insights(
+    items_db: list[WatchlistItem], universe: dict, stats_by_symbol: dict,
+) -> WatchlistInsights | None:
     if not items_db:
         return None
 
@@ -218,4 +232,20 @@ def _build_insights(items_db: list[WatchlistItem], universe: dict) -> WatchlistI
             f"a single sector-wide move could swing most of your list at once."
         )
 
-    return WatchlistInsights(sector_allocation=allocation, concentration_warning=warning)
+    correlated_pairs: list[CorrelatedPairOut] = []
+    if total >= MIN_SYMBOLS_FOR_CORRELATION:
+        symbol_closes = {
+            item.symbol: stats_by_symbol[item.symbol].recent_closes
+            for item in items_db
+            if stats_by_symbol.get(item.symbol) and stats_by_symbol[item.symbol].recent_closes
+        }
+        symbol_sectors = {item.symbol: universe.get(item.symbol, {}).get("sector") for item in items_db}
+        for pair in find_correlated_pairs(symbol_closes, symbol_sectors)[:MAX_CORRELATED_PAIRS_SHOWN]:
+            correlated_pairs.append(CorrelatedPairOut(
+                symbol_a=pair.symbol_a, symbol_b=pair.symbol_b,
+                correlation=pair.correlation, same_sector=pair.same_sector,
+            ))
+
+    return WatchlistInsights(
+        sector_allocation=allocation, concentration_warning=warning, correlated_pairs=correlated_pairs,
+    )

@@ -51,11 +51,19 @@ export default function WatchlistRow({
           <div className="flex items-center gap-1.5">
             {flagged && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" title="Changed since your last visit" />}
             <span className="font-semibold text-white text-sm truncate">{entry.symbol}</span>
+            {entry.triggered_alert_count > 0 && (
+              <span className="text-amber-400 text-xs" title={`${entry.triggered_alert_count} alert(s) triggered`}>🔔</span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             {entry.sector && (
               <span className={`text-[10px] px-1.5 py-0.5 rounded ${SECTOR_COLORS[entry.sector] || "text-slate-400 bg-slate-500/10"}`}>
                 {entry.sector}
+              </span>
+            )}
+            {entry.active_alert_count > 0 && (
+              <span className="text-[10px] text-slate-500" title="Active alert(s) watching this symbol">
+                {entry.active_alert_count} watching
               </span>
             )}
           </div>

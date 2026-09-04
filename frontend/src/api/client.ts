@@ -1,4 +1,7 @@
-import type { User, WatchlistResponse, SymbolSearchResult, ConvictionTier, MarketPulseResponse } from "../types";
+import type {
+  User, WatchlistResponse, SymbolSearchResult, ConvictionTier, MarketPulseResponse,
+  TrackRecordResponse, AlertRule, AlertRuleType,
+} from "../types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -51,6 +54,19 @@ export const api = {
   getWatchlistLive: () => request<WatchlistResponse>("/watchlist/live"),
 
   getMarketPulse: () => request<MarketPulseResponse>("/market/pulse"),
+
+  getTrackRecord: () => request<TrackRecordResponse>("/market/track-record"),
+
+  listAlerts: (symbol: string) => request<AlertRule[]>(`/watchlist/items/${encodeURIComponent(symbol)}/alerts`),
+
+  createAlert: (symbol: string, rule_type: AlertRuleType, threshold: number) =>
+    request<AlertRule>(`/watchlist/items/${encodeURIComponent(symbol)}/alerts`, {
+      method: "POST",
+      body: JSON.stringify({ rule_type, threshold }),
+    }),
+
+  deleteAlert: (symbol: string, alertId: number) =>
+    request<{ ok: true }>(`/watchlist/items/${encodeURIComponent(symbol)}/alerts/${alertId}`, { method: "DELETE" }),
 
   searchSymbols: (q: string) =>
     request<SymbolSearchResult[]>(`/watchlist/search?q=${encodeURIComponent(q)}`),

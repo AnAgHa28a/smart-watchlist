@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, watchlist, market
+from app.routers import auth, watchlist, market, alerts
 from app.services.poller import poller_loop
 from app.services.market_hours import is_market_open
 from app.services.circuit_breaker import data_source_breaker
@@ -39,6 +39,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(watchlist.router)
 app.include_router(market.router)
+app.include_router(alerts.router)
 
 
 @app.get("/health")

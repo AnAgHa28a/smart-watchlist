@@ -17,9 +17,11 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import PriceSnapshot, SymbolStats, DataSource
+from app.models import PriceSnapshot, SymbolStats, FlagEvent, DataSource
 from app.services.data_fetch import fetch_prices, fetch_historical
-from app.services.attention_score import compute_daily_return_stdev
+from app.services.attention_score import compute_daily_return_stdev, compute_attention_score, meaningful_for_tier
+from app.services.backtest import simulate_symbol, FLAT_THRESHOLD_PCT
+from app.services.alerts import evaluate_alert_rules
 from app.services.market_hours import is_market_open
 from app.config import settings
 
@@ -46,10 +48,15 @@ async def backfill_symbol_stats(db: Session, symbol: str, sector: str, name: str
 
     closes = hist["closes"]
     volumes = hist["volumes"]
+    opens = hist.get("opens", [])
+    timestamps = hist.get("timestamps", [])
+    clean_volumes = [v for v in volumes if v is not None]
     stdev = compute_daily_return_stdev(closes)
-    avg_volume = sum(volumes) / len(volumes) if volumes else None
+    avg_volume = sum(clean_volumes) / len(clean_volumes) if clean_volumes else None
     high_52w = hist.get("high_52w") or max(closes)
     low_52w = hist.get("low_52w") or min(closes)
+
+    recent_scores, flags = simulate_symbol(timestamps, closes, opens, volumes)
 
     row = db.get(SymbolStats, symbol)
     if row is None:
@@ -63,7 +70,21 @@ async def backfill_symbol_stats(db: Session, symbol: str, sector: str, name: str
     row.sector = sector
     row.name = name
     row.recent_closes = closes[-60:]
+    row.recent_scores = recent_scores
     row.last_updated = datetime.utcnow()
+
+    # Backtest results are a full replay, not an incremental update — drop
+    # the previous run's rows for this symbol and insert the fresh ones
+    # rather than trying to reconcile/diff them.
+    db.query(FlagEvent).filter(FlagEvent.symbol == symbol, FlagEvent.source == "backtest").delete()
+    for f in flags:
+        db.add(FlagEvent(
+            symbol=symbol, event_date=f["event_date"], score=f["score"],
+            price_at_flag=f["price_at_flag"], move_direction=f["move_direction"],
+            source="backtest", graded=True, outcome=f["outcome"],
+            forward_return_pct=f["forward_return_pct"], graded_at=datetime.utcnow(),
+        ))
+
     db.commit()
 
 
@@ -120,11 +141,89 @@ async def poll_once() -> None:
         db.close()
 
 
+async def log_and_grade_live_flags() -> None:
+    """Extends the track record with today's real live flags, and grades
+    older live flags once enough time has passed. Runs off the shared
+    price_snapshots cache — no extra API calls."""
+    db = SessionLocal()
+    try:
+        universe = load_universe()
+        today = datetime.utcnow().date()
+        stats_by_symbol = {row.symbol: row for row in db.query(SymbolStats).all()}
+        snapshots = {row.symbol: row for row in db.query(PriceSnapshot).all()}
+
+        for symbol in universe:
+            snap = snapshots.get(symbol)
+            stats = stats_by_symbol.get(symbol)
+            if snap is None or not snap.prev_close or snap.is_stale:
+                continue
+
+            result = compute_attention_score(
+                price=snap.price, prev_close=snap.prev_close, open_price=snap.open_price,
+                volume=snap.volume,
+                daily_return_stdev=stats.daily_return_stdev if stats else None,
+                avg_volume_20d=stats.avg_volume_20d if stats else None,
+                high_52w=stats.high_52w if stats else None,
+                low_52w=stats.low_52w if stats else None,
+                history_days=stats.history_days if stats else 0,
+            )
+            if not meaningful_for_tier(result.score, "trading"):
+                continue
+
+            already_logged = db.query(FlagEvent).filter(
+                FlagEvent.symbol == symbol, FlagEvent.event_date == today, FlagEvent.source == "live",
+            ).first()
+            if already_logged:
+                continue
+
+            direction = 1 if (snap.price - snap.prev_close) >= 0 else -1
+            db.add(FlagEvent(
+                symbol=symbol, event_date=today, score=result.score, price_at_flag=snap.price,
+                move_direction=direction, source="live", graded=False,
+            ))
+        db.commit()
+
+        # ~7 calendar days is a conservative stand-in for "5 trading sessions
+        # have definitely passed" without needing a trading-day calendar.
+        cutoff_date = today - timedelta(days=7)
+        ungraded = db.query(FlagEvent).filter(
+            FlagEvent.source == "live", FlagEvent.graded.is_(False), FlagEvent.event_date <= cutoff_date,
+        ).all()
+        for event in ungraded:
+            snap = snapshots.get(event.symbol)
+            if snap is None or snap.price is None or not event.price_at_flag:
+                continue
+            forward_return = (snap.price - event.price_at_flag) / event.price_at_flag * 100
+            forward_direction = 1 if forward_return >= 0 else -1
+            if abs(forward_return) < FLAT_THRESHOLD_PCT:
+                outcome = "flat"
+            elif event.move_direction == forward_direction:
+                outcome = "continued"
+            else:
+                outcome = "reverted"
+            event.graded = True
+            event.outcome = outcome
+            event.forward_return_pct = round(forward_return, 2)
+            event.graded_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        logger.error(f"Live flag logging/grading failed: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def poller_loop(stop_event: asyncio.Event) -> None:
     await run_backfill_pass()
     while not stop_event.is_set():
         try:
             await poll_once()
+            await log_and_grade_live_flags()
+            db = SessionLocal()
+            try:
+                evaluate_alert_rules(db)
+            finally:
+                db.close()
         except Exception as e:
             logger.error(f"Unhandled error in poll cycle: {e}")
 

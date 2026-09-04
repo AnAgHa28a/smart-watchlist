@@ -44,6 +44,22 @@ export default function SectorAllocation({ insights }: { insights: WatchlistInsi
           <span>{insights.concentration_warning}</span>
         </div>
       )}
+
+      {insights.correlated_pairs.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {insights.correlated_pairs.map((p) => (
+            <div key={`${p.symbol_a}-${p.symbol_b}`} className="flex items-start gap-2 text-[11px] text-amber-400/90 bg-amber-400/[0.06] rounded-lg px-2.5 py-2">
+              <span className="shrink-0">⚠</span>
+              <span>
+                <span className="text-white font-medium">{p.symbol_a}</span> and{" "}
+                <span className="text-white font-medium">{p.symbol_b}</span> have moved together{" "}
+                {Math.round(Math.abs(p.correlation) * 100)}% of the time over the last 60 sessions
+                {!p.same_sector && " — different sectors, but not actually independent"}.
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

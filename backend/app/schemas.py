@@ -67,9 +67,13 @@ class WatchlistEntryOut(BaseModel):
     insufficient_history: bool = False
 
     sparkline: list[float] | None = None
+    score_sparkline: list[float] | None = None
     high_52w: float | None = None
     low_52w: float | None = None
     relative_strength_pct: float | None = None  # change_pct - sector_avg_move_pct
+
+    active_alert_count: int = 0
+    triggered_alert_count: int = 0
 
 
 class DigestItem(BaseModel):
@@ -85,9 +89,17 @@ class SectorAllocationEntry(BaseModel):
     pct: float
 
 
+class CorrelatedPairOut(BaseModel):
+    symbol_a: str
+    symbol_b: str
+    correlation: float
+    same_sector: bool
+
+
 class WatchlistInsights(BaseModel):
     sector_allocation: list[SectorAllocationEntry]
     concentration_warning: str | None = None
+    correlated_pairs: list[CorrelatedPairOut] = []
 
 
 class WatchlistResponse(BaseModel):
@@ -127,3 +139,39 @@ class MarketPulseResponse(BaseModel):
     flagged_count: int
     sectors: list[SectorPulse]
     top_movers: list[TopMover]
+
+
+class TrackRecordBucket(BaseModel):
+    label: str
+    count: int
+    continued_pct: float
+
+
+class TrackRecordResponse(BaseModel):
+    total_graded: int
+    continued_pct: float
+    reverted_pct: float
+    flat_pct: float
+    backtest_count: int
+    live_count: int
+    live_pending: int
+    buckets: list[TrackRecordBucket]
+
+
+# --- Alerts ---
+class CreateAlertRuleRequest(BaseModel):
+    rule_type: str  # "price_above" | "price_below" | "volume_multiple"
+    threshold: float = Field(gt=0)
+
+
+class AlertRuleOut(BaseModel):
+    id: int
+    symbol: str
+    rule_type: str
+    threshold: float
+    created_at: datetime
+    triggered_at: datetime | None
+    active: bool
+
+    class Config:
+        from_attributes = True

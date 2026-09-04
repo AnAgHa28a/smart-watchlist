@@ -39,9 +39,13 @@ export interface WatchlistEntry {
   insufficient_history: boolean;
 
   sparkline: number[] | null;
+  score_sparkline: number[] | null;
   high_52w: number | null;
   low_52w: number | null;
   relative_strength_pct: number | null;
+
+  active_alert_count: number;
+  triggered_alert_count: number;
 }
 
 export interface SectorAllocationEntry {
@@ -50,9 +54,17 @@ export interface SectorAllocationEntry {
   pct: number;
 }
 
+export interface CorrelatedPair {
+  symbol_a: string;
+  symbol_b: string;
+  correlation: number;
+  same_sector: boolean;
+}
+
 export interface WatchlistInsights {
   sector_allocation: SectorAllocationEntry[];
   concentration_warning: string | null;
+  correlated_pairs: CorrelatedPair[];
 }
 
 export interface SectorPulse {
@@ -99,4 +111,33 @@ export interface SymbolSearchResult {
   symbol: string;
   name: string;
   sector: string;
+}
+
+export interface TrackRecordBucket {
+  label: string;
+  count: number;
+  continued_pct: number;
+}
+
+export interface TrackRecordResponse {
+  total_graded: number;
+  continued_pct: number;
+  reverted_pct: number;
+  flat_pct: number;
+  backtest_count: number;
+  live_count: number;
+  live_pending: number;
+  buckets: TrackRecordBucket[];
+}
+
+export type AlertRuleType = "price_above" | "price_below" | "volume_multiple";
+
+export interface AlertRule {
+  id: number;
+  symbol: string;
+  rule_type: AlertRuleType;
+  threshold: number;
+  created_at: string;
+  triggered_at: string | null;
+  active: boolean;
 }

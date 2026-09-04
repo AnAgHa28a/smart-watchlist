@@ -1,6 +1,7 @@
 import type { WatchlistEntry } from "../types";
 import Sparkline from "./Sparkline";
 import { Meter, RangePosition } from "./SignalMeter";
+import AlertsSection from "./AlertsSection";
 
 export default function RowDetail({ entry }: { entry: WatchlistEntry }) {
   const s = entry.signals;
@@ -44,6 +45,19 @@ export default function RowDetail({ entry }: { entry: WatchlistEntry }) {
           {s?.gap_pct != null && Math.abs(s.gap_pct) > 0.05 && (
             <Meter label="Gap at open" fraction={Math.min(Math.abs(s.gap_pct) / 5, 1)} valueLabel={`${s.gap_pct >= 0 ? "+" : ""}${s.gap_pct.toFixed(2)}%`} />
           )}
+        </div>
+
+        <div>
+          <p className="text-[11px] text-slate-500 mb-1.5">Attention score trend — escalating or cooling off</p>
+          {entry.score_sparkline && entry.score_sparkline.length > 1 ? (
+            <Sparkline values={entry.score_sparkline} width={280} height={40} />
+          ) : (
+            <p className="text-xs text-slate-600">Building history…</p>
+          )}
+        </div>
+
+        <div>
+          <AlertsSection symbol={entry.symbol} />
         </div>
       </div>
     </div>
